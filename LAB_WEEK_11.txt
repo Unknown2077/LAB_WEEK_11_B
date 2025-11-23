@@ -1,0 +1,58 @@
+Part 3 — LAB_WEEK_11 Answers
+
+1) Which part of the code handles storing the taken picture (copied from the project):
+
+// From ProviderFileManager.kt
+fun insertImageToStore(fileInfo: FileInfo?) {
+    fileInfo?.let {
+        insertToStore(
+            fileInfo,
+            mediaContentHelper.getImageContentUri(),
+            mediaContentHelper.generateImageContentValues(it)
+        )
+    }
+}
+
+// Insert the file to MediaStore
+// The file will be copied to the given relative path
+// Input Stream is used to read the file
+// Output Stream is used to write the file
+private fun insertToStore(fileInfo: FileInfo, contentUri: Uri,
+                          contentValues: ContentValues) {
+    executor.execute {
+        val insertedUri = contentResolver.insert(contentUri,
+            contentValues)
+        insertedUri?.let {
+            val inputStream =
+                contentResolver.openInputStream(fileInfo.uri)
+            val outputStream =
+                contentResolver.openOutputStream(insertedUri)
+            IOUtils.copy(inputStream, outputStream)
+        }
+    }
+}
+
+
+2) FileInfo attributes explanation (first and fourth attributes):
+
+- First attribute (uri: Uri):
+  This is the content URI that refers to the temporary file location where the camera app writes the captured image. In this project the URI is produced by the app's FileProvider (via `fileHelper.getUriFromFile(file)`), and points to the file inside the app-specific external files directory (the file is passed to the camera so the camera writes the image there).
+
+- Fourth attribute (relativePath: String):
+  This is the relative directory path (folder) that will be stored in MediaStore as `MediaStore.Images.Media.RELATIVE_PATH` (on Android Q / API 29+). It indicates the destination folder under primary external storage (for example a Pictures/ subfolder) where the copied image should appear in the system media collection. In this project it is set from `fileHelper.getPicturesFolder()` (or the videos folder for video files).
+
+
+3) [Bonus] Chronological order from user taking a picture until the file is stored in MediaStore:
+
+1. User taps the photo button in the app UI. The app checks storage permission and then calls `openImageCapture()`.
+2. `openImageCapture()` calls `providerFileManager.generatePhotoUri(System.currentTimeMillis())`, which:
+   - Creates a File object in the app's external files pictures folder.
+   - Wraps that File with a content URI (via the app's FileProvider) and returns a `FileInfo` containing the URI, File, name, relativePath and mimeType.
+3. The app launches the camera via `takePictureLauncher.launch(photoInfo!!.uri)`, providing the content URI so the camera writes the captured image to that URI (the app's temporary file).
+4. When the camera finishes successfully, the registered `ActivityResultContracts.TakePicture()` callback runs; the app then calls `providerFileManager.insertImageToStore(photoInfo)`.
+5. `insertImageToStore()` prepares ContentValues (DISPLAY_NAME, RELATIVE_PATH when API >= Q, MIME_TYPE) and calls `insertToStore()`.
+6. `insertToStore()` runs on the provided executor and:
+   - Calls `contentResolver.insert(contentUri, contentValues)` to create a new MediaStore entry and obtain its `insertedUri` (the final destination in MediaStore / shared storage).
+   - Opens an InputStream for the temporary file (using `contentResolver.openInputStream(fileInfo.uri)`) and an OutputStream for the `insertedUri` (`contentResolver.openOutputStream(insertedUri)`).
+   - Copies the bytes from input to output (IOUtils.copy), effectively copying the captured image into the MediaStore location (e.g., under Pictures/ or the specified RELATIVE_PATH).
+7. After the copy completes, the image is visible to the system media store (gallery apps). The project code does not explicitly delete the original temporary file, so the temporary file may remain in the app's external files directory unless cleaned up.
